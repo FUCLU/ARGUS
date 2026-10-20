@@ -1,0 +1,212 @@
+{
+  "source": "data/llmxcpg/sven_test.json",
+  "source_sha256": "fb60f4fc8a2a9d3bfd3d3fdd6ea384184001b664a4e62a55ef6b56da825f6bf9",
+  "source_records": 254,
+  "unique_exact_inputs": 74,
+  "excluded_conflicting_label_groups": 8,
+  "excluded_rows_in_conflicting_groups": 51,
+  "retained_unique_consistent_inputs": 66,
+  "retained_labels": {
+    "VULNERABLE": 26,
+    "BENIGN": 40
+  },
+  "retained_cwes": {
+    "CWE-416": 29,
+    "CWE-190": 18,
+    "CWE-125": 19
+  },
+  "duplicate_rows_collapsed": 137,
+  "conflicts": [
+    {
+      "sha256": "f0ef695acdc7a502dd19007bffa041bc036a59385970464d1156a89796fa4eed",
+      "source_indices": [
+        76,
+        78,
+        79,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_191.c",
+        "sven_safe_191.c",
+        "sven_safe_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c",
+        "sven_vul_191.c"
+      ]
+    },
+    {
+      "sha256": "225653bf7ed9146012c1c8e3c89d9605c31c159ea83f2567e58c4d62cffe37d6",
+      "source_indices": [
+        91,
+        92
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_190.c",
+        "sven_vul_190.c"
+      ]
+    },
+    {
+      "sha256": "732a647b2f0e2755e8d8cf8382a92051729cf2d260cec56413a9d4098854504c",
+      "source_indices": [
+        167,
+        172,
+        175,
+        176
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_41.c",
+        "sven_safe_41.c",
+        "sven_vul_41.c",
+        "sven_vul_41.c"
+      ]
+    },
+    {
+      "sha256": "16b39af1f70b1d0427116f23c2abcb7b891f01e06490261db14684d18f8191bd",
+      "source_indices": [
+        189,
+        197,
+        199,
+        204
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c"
+      ]
+    },
+    {
+      "sha256": "989f94b3159cff8f1a2820fb08a37cd561f39c6a7002f3ab6e225c1b8a68ccd5",
+      "source_indices": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        198,
+        200,
+        201,
+        202,
+        203
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_35.c",
+        "sven_safe_35.c",
+        "sven_safe_35.c",
+        "sven_safe_35.c",
+        "sven_safe_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c",
+        "sven_vul_35.c"
+      ]
+    },
+    {
+      "sha256": "0981d314d63daba2f576ec970e9cfb008354530d72b488a16a5af9d2f84d0e65",
+      "source_indices": [
+        226,
+        239
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_32.c",
+        "sven_vul_32.c"
+      ]
+    },
+    {
+      "sha256": "945c39d17a9e4dec8e142c6c7887a28e0adba155f94a22bb27c714da23470a42",
+      "source_indices": [
+        227,
+        229,
+        230,
+        231,
+        235,
+        237,
+        240,
+        241,
+        242
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_32.c",
+        "sven_safe_32.c",
+        "sven_safe_32.c",
+        "sven_safe_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c"
+      ]
+    },
+    {
+      "sha256": "1cc31dc4ac9b5736e384f00b969b2f92d2bee78ebaba923f2f24ccafdfd1e589",
+      "source_indices": [
+        232,
+        233,
+        234,
+        238,
+        243
+      ],
+      "labels": [
+        "BENIGN",
+        "VULNERABLE"
+      ],
+      "file_names": [
+        "sven_safe_32.c",
+        "sven_safe_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c",
+        "sven_vul_32.c"
+      ]
+    }
+  ],
+  "policy": "Exact input strings are grouped. Conflicting-label groups are excluded from primary A/B metrics; one original row per remaining exact input is retained. Original source is unchanged."
+}

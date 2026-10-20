@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/qcri/llmxcpg",
+  "commit": "fd7af0df8d2221ec196b85bc460da5cb40f6866c",
+  "source_url": "https://raw.githubusercontent.com/qcri/llmxcpg/fd7af0df8d2221ec196b85bc460da5cb40f6866c/data/sven_test.json",
+  "downloaded_at_utc": "2026-10-01T06:09:18.2283153Z",
+  "sha256": "fb60f4fc8a2a9d3bfd3d3fdd6ea384184001b664a4e62a55ef6b56da825f6bf9",
+  "records": 254,
+  "transformation": "None; original bytes preserved"
+}

@@ -1,0 +1,1168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/AttackReport",
+  "$defs": {
+    "Location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "coordinate_system": {
+          "enum": [
+            "ORIGINAL_FILE",
+            "FUNCTION_LOCAL",
+            "SYNTHETIC_FILE"
+          ]
+        }
+      },
+      "required": [
+        "file",
+        "line_start",
+        "line_end",
+        "coordinate_system"
+      ]
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "SOURCE",
+            "DERIVED_FLOW",
+            "API_CONTRACT"
+          ]
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "text",
+        "provenance",
+        "source_version",
+        "derived_from"
+      ]
+    },
+    "Mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_line_start": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "input_line_start": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "original_file": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "original_line_start": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "evidence_id",
+        "prompt_line_start",
+        "input_line_start",
+        "original_file",
+        "original_line_start"
+      ]
+    },
+    "Gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "MISSING_SOURCE",
+            "TRUNCATION",
+            "QUERY_FAILURE",
+            "UNKNOWN_SEMANTICS",
+            "UNEXAMINED_SCOPE"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "description",
+        "evidence_refs"
+      ]
+    },
+    "ThreatModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "implementation_evidence",
+            "function_adversarial_inputs"
+          ]
+        },
+        "attacker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability_basis": {
+          "enum": [
+            "IMPLEMENTATION_EVIDENCE",
+            "DECLARED_TASK_ASSUMPTION"
+          ]
+        },
+        "declared_assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "attacker",
+        "capability_basis",
+        "declared_assumptions",
+        "evidence_refs"
+      ]
+    },
+    "Packet": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "eg-audit-v2-compact"
+        },
+        "packet_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sink": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "expression": {
+              "type": "string",
+              "minLength": 1
+            },
+            "operation_type": {
+              "type": "string",
+              "minLength": 1
+            },
+            "location": {
+              "$ref": "#/$defs/Location"
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            }
+          },
+          "required": [
+            "expression",
+            "operation_type",
+            "location",
+            "evidence_refs"
+          ]
+        },
+        "analysis_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mechanism_scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope_basis": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "description",
+            "evidence_refs"
+          ]
+        },
+        "threat_model": {
+          "$ref": "#/$defs/ThreatModel"
+        },
+        "extraction_status": {
+          "enum": [
+            "ok",
+            "partial",
+            "error"
+          ]
+        },
+        "evidence_registry": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "minItems": 1
+        },
+        "evidence_links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "DATA_FLOW",
+                  "CONTROL_FLOW",
+                  "DEFINITION",
+                  "USE",
+                  "CALL"
+                ]
+              },
+              "from_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "relation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provenance": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "kind",
+              "from_ref",
+              "to_ref",
+              "relation",
+              "provenance"
+            ]
+          },
+          "minItems": 0
+        },
+        "known_gaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Gap"
+          },
+          "minItems": 0
+        },
+        "source_mapping": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Mapping"
+          },
+          "minItems": 1
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_scenarios": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "context_expansions_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": [
+            "max_scenarios",
+            "context_expansions_remaining"
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "packet_id",
+        "candidate_id",
+        "source_version",
+        "sink",
+        "analysis_scope",
+        "mechanism_scope",
+        "scope_basis",
+        "threat_model",
+        "extraction_status",
+        "evidence_registry",
+        "evidence_links",
+        "known_gaps",
+        "source_mapping",
+        "budget"
+      ]
+    },
+    "MissingContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "target",
+        "reason",
+        "refs"
+      ]
+    },
+    "Prerequisite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "CAPABILITY",
+            "REACHABILITY",
+            "PROPAGATION",
+            "TRIGGER",
+            "OPERATION_SEMANTICS",
+            "SECURITY_IMPACT",
+            "OTHER"
+          ]
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "condition",
+        "refs"
+      ]
+    },
+    "PotentialProtection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "id",
+        "mechanism",
+        "refs"
+      ]
+    },
+    "Scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scenario": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Prerequisite"
+          },
+          "minItems": 1
+        },
+        "potential_protections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PotentialProtection"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "id",
+        "scenario",
+        "path_refs",
+        "prerequisites",
+        "potential_protections"
+      ]
+    },
+    "AttackReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Scenario"
+          },
+          "minItems": 0,
+          "maxItems": 3
+        },
+        "missing_context": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MissingContext"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "scenarios",
+        "missing_context"
+      ]
+    },
+    "PrerequisiteCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "SATISFIED",
+            "BLOCKED",
+            "UNKNOWN",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "refs",
+        "reason"
+      ]
+    },
+    "ProtectionCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "EFFECTIVE",
+            "INEFFECTIVE",
+            "UNKNOWN"
+          ]
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "refs",
+        "reason"
+      ]
+    },
+    "ScenarioCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "FEASIBLE",
+            "BLOCKED",
+            "UNRESOLVED"
+          ]
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "status",
+        "refs",
+        "reason"
+      ]
+    },
+    "Invariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claim": {
+          "type": "string",
+          "minLength": 1
+        },
+        "refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        }
+      },
+      "required": [
+        "claim",
+        "refs"
+      ]
+    },
+    "Coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "ESTABLISHED",
+            "NOT_ESTABLISHED"
+          ]
+        },
+        "invariants": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Invariant"
+          },
+          "minItems": 0
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "status",
+        "invariants",
+        "gaps"
+      ]
+    },
+    "Revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scenario": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path_refs": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Prerequisite"
+          },
+          "minItems": 0
+        },
+        "potential_protections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PotentialProtection"
+          },
+          "minItems": 0
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "scenario_id",
+        "reason"
+      ]
+    },
+    "AuditBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prerequisite_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrerequisiteCheck"
+          },
+          "minItems": 0
+        },
+        "protection_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProtectionCheck"
+          },
+          "minItems": 0
+        },
+        "scenario_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScenarioCheck"
+          },
+          "minItems": 0
+        },
+        "scope_coverage": {
+          "$ref": "#/$defs/Coverage"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "missing_context": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MissingContext"
+          },
+          "minItems": 0
+        },
+        "revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Revision"
+          },
+          "minItems": 0
+        },
+        "added_scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Scenario"
+          },
+          "minItems": 0
+        }
+      },
+      "required": [
+        "prerequisite_checks",
+        "protection_checks",
+        "scenario_checks",
+        "scope_coverage",
+        "reason",
+        "missing_context"
+      ]
+    },
+    "AuditorOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prerequisite_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PrerequisiteCheck"
+          },
+          "minItems": 0
+        },
+        "protection_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProtectionCheck"
+          },
+          "minItems": 0
+        },
+        "scenario_checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScenarioCheck"
+          },
+          "minItems": 0
+        },
+        "scope_coverage": {
+          "$ref": "#/$defs/Coverage"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "missing_context": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MissingContext"
+          },
+          "minItems": 0
+        },
+        "revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Revision"
+          },
+          "minItems": 0
+        },
+        "added_scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Scenario"
+          },
+          "minItems": 0
+        },
+        "verdict": {
+          "enum": [
+            "VULNERABLE",
+            "BENIGN",
+            null
+          ]
+        }
+      },
+      "required": [
+        "prerequisite_checks",
+        "protection_checks",
+        "scenario_checks",
+        "scope_coverage",
+        "reason",
+        "missing_context",
+        "verdict"
+      ]
+    },
+    "AuditInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "packet": {
+          "$ref": "#/$defs/Packet"
+        },
+        "attack_report": {
+          "$ref": "#/$defs/AttackReport"
+        }
+      },
+      "required": [
+        "packet",
+        "attack_report"
+      ]
+    },
+    "Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": {
+          "const": "eg-audit-v2-compact"
+        },
+        "candidate_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "packet_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "packet_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "uri": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "packet_id",
+            "sha256",
+            "uri"
+          ]
+        },
+        "pipeline_status": {
+          "enum": [
+            "RESOLVED",
+            "NEEDS_CONTEXT",
+            "UNRESOLVED",
+            "INVALID_INPUT",
+            "INVALID_OUTPUT",
+            "ERROR"
+          ]
+        },
+        "final_assessment": {
+          "enum": [
+            "VULNERABLE",
+            "BENIGN",
+            null
+          ]
+        },
+        "attack_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttackReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "audit_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuditBody"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "validation_errors": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        },
+        "run_metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "schema_version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "context_expansions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "repair_calls": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "latency_ms": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "impact_validation": {
+              "const": "STATIC"
+            }
+          },
+          "required": [
+            "run_id",
+            "model_id",
+            "prompt_version",
+            "schema_version",
+            "context_expansions",
+            "repair_calls",
+            "input_tokens",
+            "output_tokens",
+            "latency_ms",
+            "impact_validation"
+          ]
+        }
+      },
+      "required": [
+        "protocol_version",
+        "candidate_id",
+        "packet_ref",
+        "pipeline_status",
+        "final_assessment",
+        "attack_report",
+        "audit_report",
+        "validation_errors",
+        "run_metadata"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "pipeline_status": {
+                "const": "RESOLVED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final_assessment": {
+                "enum": [
+                  "VULNERABLE",
+                  "BENIGN"
+                ]
+              },
+              "attack_report": {
+                "$ref": "#/$defs/AttackReport"
+              },
+              "audit_report": {
+                "$ref": "#/$defs/AuditBody"
+              },
+              "validation_errors": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "pipeline_status": {
+                "enum": [
+                  "NEEDS_CONTEXT",
+                  "UNRESOLVED",
+                  "INVALID_INPUT",
+                  "INVALID_OUTPUT",
+                  "ERROR"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "final_assessment": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

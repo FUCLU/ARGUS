@@ -1,0 +1,25 @@
+{
+  "records": 254,
+  "labels": {
+    "VULNERABLE": 129,
+    "BENIGN": 125
+  },
+  "cwes": {
+    "CWE-416": 93,
+    "CWE-190": 70,
+    "CWE-125": 91
+  },
+  "unique_exact_inputs": 74,
+  "duplicate_input_extra_rows": 180,
+  "conflicting_label_input_groups": 8,
+  "fields": [
+    "cwe",
+    "dataset",
+    "file_name",
+    "input",
+    "instruction",
+    "output"
+  ],
+  "existing_reconstructed_records": 33,
+  "existing_reconstructed_exact_input_overlap": 0
+}
