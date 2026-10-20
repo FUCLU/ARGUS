@@ -11,3 +11,7 @@ coverage.xml
 tests/tmp*/
 /outputs/*
 !/outputs/.gitkeep
+/paper/*
+/docs/
+CLAUDE.md
+.claude/*

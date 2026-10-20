@@ -1,0 +1,15 @@
+# LLM settings for every agent call (Stage 1 fallback, Stage 3 agents).
+# Secrets stay in the environment: the API key is read from the variable named by `api_key_env`.
+
+provider: openrouter            # openrouter | deepseek | openai-compatible
+model: qwen/qwen3-32b           # openai-compatible servers usually expect e.g. qwen3-32b
+base_url: https://openrouter.ai/api/v1   # openai-compatible: set to your endpoint, ending in /v1
+api_key_env: OPENROUTER_API_KEY
+
+temperature: 0                  # paper: 0 "whenever supported" (tr. 9)
+max_tokens: 4096                # not stated in the paper
+thinking: false                 # true | false | null (null = do not send the parameter); not stated in the paper
+
+timeout_seconds: 180
+max_attempts: 3                 # HTTP attempts per request (exponential backoff)
+fetch_generation_metadata: false   # openrouter only

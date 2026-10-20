@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -12,25 +11,8 @@ from urllib.parse import quote
 import httpx
 
 from ..io import append_jsonl
+from .config import LLMConfig
 
-BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-MODEL_ID = os.getenv("TRIAGE_MODEL", "qwen/qwen3-32b")
-STAGE_SETTINGS = {
-    "hypothesis": dict(
-        model=MODEL_ID,
-        temperature=0,
-        max_tokens=8192,
-        reasoning={"enabled": True},
-        provider={"require_parameters": True},
-    ),
-    "validation": dict(
-        model=MODEL_ID,
-        temperature=0,
-        max_tokens=4096,
-        reasoning={"enabled": True},
-        provider={"require_parameters": True},
-    ),
-}
 _LOG_LOCK = threading.RLock()
 
 
@@ -42,24 +24,26 @@ class FatalAPIError(APIError):
     """A non-retryable configuration or request failure."""
 
 
-class OpenRouter:
-    """Small ABP-only OpenRouter client with bounded retries and safe logs."""
+class LLMClient:
+    """Chat-completions client driven by an LLMConfig, with bounded retries and safe logs."""
 
     def __init__(
         self,
-        key: str,
+        config: LLMConfig,
         log_path: str | Path,
         *,
-        base_url: str | None = None,
         client: httpx.Client | None = None,
         sleep=time.sleep,
     ) -> None:
-        self.key = key
+        self.config = config
+        self.key = config.api_key
+        if not self.key:
+            raise FatalAPIError(f"Set {config.api_key_env}")
         self.log_path = Path(log_path)
-        self.base_url = (base_url or BASE_URL).rstrip("/")
-        self.provider_name = "OpenRouter"
+        self.base_url = config.base_url.rstrip("/")
+        self.provider_name = config.provider
         self.sleep = sleep
-        self.client = client or httpx.Client(timeout=180)
+        self.client = client or httpx.Client(timeout=config.timeout_seconds)
         self._cancel_event = threading.Event()
 
     def _log(self, event: dict[str, Any]) -> None:
@@ -67,7 +51,8 @@ class OpenRouter:
             append_jsonl(self.log_path, event)
 
     def request(self, method: str, route: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        for attempt in range(3):
+        attempts = self.config.max_attempts
+        for attempt in range(attempts):
             if self._cancel_event.is_set():
                 raise FatalAPIError("request cancelled")
             started = time.monotonic()
@@ -119,7 +104,7 @@ class OpenRouter:
                     "error": error,
                 })
 
-            if attempt == 2:
+            if attempt == attempts - 1:
                 raise APIError(error)
 
             delay = 2**attempt
@@ -146,6 +131,9 @@ class OpenRouter:
         raise APIError(f"{self.provider_name} request failed")
 
     def auth_check(self) -> None:
+        """OpenRouter only: verify the key before a run."""
+        if self.config.provider != "openrouter":
+            return
         try:
             response = self.client.get(
                 self.base_url + "/key",
@@ -156,13 +144,17 @@ class OpenRouter:
         self._log({"event": "auth_check", "http_status": response.status_code})
         if not response.is_success:
             raise FatalAPIError(
-                f"OpenRouter key check HTTP {response.status_code}; verify OPENROUTER_API_KEY"
+                f"OpenRouter key check HTTP {response.status_code}; verify {self.config.api_key_env}"
             )
 
     def preflight(self) -> list[dict[str, Any]]:
-        model_id = STAGE_SETTINGS["validation"]["model"]
-        data = self.request("GET", "/models/" + model_id + "/endpoints")
-        required = {"reasoning", "response_format", "temperature", "max_tokens"}
+        """OpenRouter only: require an endpoint that supports the parameters we send."""
+        if self.config.provider != "openrouter":
+            return []
+        data = self.request("GET", "/models/" + self.config.model + "/endpoints")
+        required = {"response_format", "temperature", "max_tokens"}
+        if self.config.thinking is not None:
+            required.add("reasoning")
         compatible = [
             endpoint
             for endpoint in data.get("data", {}).get("endpoints", [])
@@ -180,32 +172,36 @@ class OpenRouter:
             for item in compatible
         ]
 
-    def completion(
-        self,
-        messages: list[dict[str, str]],
-        schema: dict[str, Any],
-        settings: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        body = dict(settings or STAGE_SETTINGS["hypothesis"], messages=messages)
-        json_only = body.pop("json_only", False)
-        body["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "agent_response",
-                "strict": True,
-                "schema": schema,
-            },
-        }
-        if json_only:
+    def _body(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+        cfg = self.config
+        body: dict[str, Any] = dict(
+            model=cfg.model,
+            temperature=cfg.temperature,
+            max_tokens=cfg.max_tokens,
+            messages=messages,
+        )
+        if cfg.provider == "openrouter":
+            body["provider"] = {"require_parameters": True}
+            if cfg.thinking is not None:
+                body["reasoning"] = {"enabled": cfg.thinking}
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "agent_response", "strict": True, "schema": schema},
+            }
+        else:
+            # JSON mode enforces syntax only; the protocol's Pydantic validation
+            # and one-repair loop enforce the response schema.
             body["response_format"] = {"type": "json_object"}
-        response = self.request("POST", "/chat/completions", body)
+            if cfg.provider == "openai-compatible":
+                body["stream"] = False
+                if cfg.thinking is not None:
+                    body["enable_thinking"] = cfg.thinking
+        return body
+
+    def completion(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any]:
+        response = self.request("POST", "/chat/completions", self._body(messages, schema))
         generation_id = response.get("id")
-        fetch_metadata = os.getenv("OPENROUTER_FETCH_GENERATION_METADATA", "0").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-        }
-        if generation_id and fetch_metadata:
+        if generation_id and self.config.fetch_generation_metadata and self.config.provider == "openrouter":
             try:
                 metadata = self.request(
                     "GET", "/generation?id=" + quote(generation_id, safe="")
@@ -236,61 +232,3 @@ class OpenRouter:
 
     def close(self) -> None:
         self.client.close()
-
-
-class DeepSeek(OpenRouter):
-    """DeepSeek transport using its OpenAI-compatible JSON-object mode."""
-
-    def __init__(
-        self,
-        key: str,
-        log_path: str | Path,
-        *,
-        base_url: str = "https://api.deepseek.com",
-        client: httpx.Client | None = None,
-        sleep=time.sleep,
-    ) -> None:
-        super().__init__(
-            key,
-            log_path,
-            base_url=base_url,
-            client=client,
-            sleep=sleep,
-        )
-        self.provider_name = "DeepSeek"
-
-    def completion(
-        self,
-        messages: list[dict[str, str]],
-        schema: dict[str, Any],
-        settings: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        options = settings or STAGE_SETTINGS["hypothesis"]
-        body = {
-            key: options[key]
-            for key in ("model", "temperature", "max_tokens")
-            if key in options
-        }
-        body["messages"] = messages
-        # DeepSeek JSON mode enforces JSON syntax; ABP's existing Pydantic
-        # validation and one-repair protocol enforce the response schema.
-        body["response_format"] = {"type": "json_object"}
-        return self.request("POST", "/chat/completions", body)
-
-
-class OpenAICompatible(DeepSeek):
-    """Generic OpenAI-compatible chat-completions endpoint."""
-
-    def __init__(self, key: str, log_path: str | Path, *, base_url: str, client=None, sleep=time.sleep) -> None:
-        super().__init__(key, log_path, base_url=base_url, client=client, sleep=sleep)
-        self.provider_name = "OpenAI-compatible endpoint"
-
-    def completion(self, messages, schema, settings=None):
-        """Forward the Qwen-compatible JSON, thinking, and stream options."""
-        options = settings or STAGE_SETTINGS["hypothesis"]
-        body = {key: options[key] for key in ("model", "temperature", "max_tokens") if key in options}
-        body.update(messages=messages, stream=bool(options.get("stream", False)),
-                    response_format={"type": "json_object"})
-        if "enable_thinking" in options:
-            body["enable_thinking"] = bool(options["enable_thinking"])
-        return self.request("POST", "/chat/completions", body)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import hashlib
 import os
@@ -10,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from ..io import append_jsonl, timestamped_run_output
-from .client import DeepSeek, FatalAPIError, OpenAICompatible, OpenRouter, STAGE_SETTINGS
+from ..llm.client import FatalAPIError, LLMClient
+from ..llm.config import load_llm_config
 from .protocol import (
-    ABPEngine,
+    ValidationEngine,
     PROTOCOL,
     candidate_status,
     configure_prompt_templates,
@@ -112,33 +114,6 @@ def _ground_truth(row: dict[str, Any]) -> str | None:
         if text in {"0", "benign", "safe", "negative", "false", "no"}:
             return "BENIGN"
     return None
-
-
-def normalize_direct_source_rows(rows: list[dict[str, Any]], origin: str) -> list[dict[str, Any]]:
-    """Map raw code/label records into the Stage 3 direct-source contract."""
-    normalized = []
-    for idx, row in enumerate(rows):
-        code = row.get("input")
-        if not isinstance(code, str) or not code.strip():
-            raise ValueError(f"{origin} row {idx}: input must contain source code")
-        label = _ground_truth({"label": row.get("output")})
-        if label is None:
-            raise ValueError(f"{origin} row {idx}: output must be BENIGN or VULNERABLE")
-        file_name = str(row.get("file_name") or f"sample_{idx:06d}")
-        dataset = str(row.get("dataset") or "direct-source")
-        normalized.append({
-            "sample_id": f"{dataset}:{file_name}:{idx}",
-            "idx": idx,
-            "pair_id": row.get("pair_id"),
-            "dataset": dataset,
-            "file_name": file_name,
-            "func": code,
-            "ground_truth": label,
-            "ground_truth_cwe": _ground_truth_cwe(row),
-            "_direct_source_mode": True,
-        })
-    unique_index(normalized, f"{origin} normalized direct-source dataset")
-    return normalized
 
 
 def _ground_truth_cwe(row: dict[str, Any]) -> str | None:
@@ -289,37 +264,7 @@ def context_prompt_code(
     compact_code = context.get("compact_code")
     anchor = context.get("anchor")
     if not isinstance(compact_code, str) or not compact_code.strip():
-        # Recover unresolved Stage 2 anchors from the original function text.
-        # This remains source-grounded and keeps the sink plus related operand
-        # lines inside the packet's normal line budget.
-        budget = context.get("context_line_budget", 120)
-        budget = budget if type(budget) is int and budget > 0 else 120
-        sink_lines = set(range(candidate["line_start"], candidate["line_end"] + 1))
-        if len(sink_lines) > budget:
-            raise ValueError("sink span exceeds the source fallback context budget")
-        identifiers = set(re.findall(
-            r"[A-Za-z_][A-Za-z0-9_]*", candidate.get("expression", "")
-        ))
-        center = (candidate["line_start"] + candidate["line_end"]) // 2
-        other_lines = [line for line in range(1, len(source_lines) + 1) if line not in sink_lines]
-        other_lines.sort(key=lambda line: (
-            0 if identifiers.intersection(re.findall(
-                r"[A-Za-z_][A-Za-z0-9_]*", source_lines[line - 1]
-            )) else 1,
-            abs(line - center),
-            line,
-        ))
-        selected = sink_lines | set(other_lines[:max(0, budget - len(sink_lines))])
-        file_name = (
-            anchor.get("file_name") if isinstance(anchor, dict) else None
-        ) or "processed_function"
-        rendered = ["[SINK]"]
-        for line in sorted(sink_lines):
-            rendered.append(f"L{line}: [{file_name}:{line}] {source_lines[line - 1]}")
-        rendered.append("[FUNCTION SOURCE FALLBACK]")
-        for line in sorted(selected - sink_lines):
-            rendered.append(f"L{line}: [{file_name}:{line}] {source_lines[line - 1]}")
-        return "\n".join(rendered)
+        raise ValueError("Stage 2 context has no compact_code; raw function source is not sent to the model")
     compact_code = _augment_legacy_call_context(compact_code, context)
     if not isinstance(anchor, dict) or not isinstance(anchor.get("file_name"), str):
         raise ValueError("Stage 2 packet has no source anchor for compact_code")
@@ -408,7 +353,7 @@ def context_prompt_code(
 
 
 def source_view_for_context(source_code: str, prompt_code: str) -> str:
-    """Build the ABP citation view, including virtual call-evidence lines."""
+    """Build the citation view, including virtual call-evidence lines."""
     source_lines = source_code.splitlines()
     evidence_line = re.compile(r"(?m)^L([1-9][0-9]*): \[[^\]\r\n]+:[1-9][0-9]*\] (.*)$")
     evidence = {int(match.group(1)): match.group(2) for match in evidence_line.finditer(prompt_code)}
@@ -480,7 +425,7 @@ def prepare_candidate(
     return assessment_input, None
 
 
-def assess_candidate(engine: ABPEngine, assessment_input: dict[str, Any], rank: int, sink: dict[str, Any]) -> dict[str, Any]:
+def assess_candidate(engine: ValidationEngine, assessment_input: dict[str, Any], rank: int, sink: dict[str, Any]) -> dict[str, Any]:
     result = engine.process(assessment_input)
     return {
         "sink_rank": rank,
@@ -490,12 +435,11 @@ def assess_candidate(engine: ABPEngine, assessment_input: dict[str, Any], rank: 
         "prediction": result.get("prediction"),
         "triage_status": result.get("triage_status"),
         "protocol_status": result.get("protocol_status"),
-        "round_count": result.get("round_count"),
-        "completed_rounds": result.get("completed_rounds"),
-        "vulnerable_votes": result.get("vulnerable_votes"),
-        "benign_votes": result.get("benign_votes"),
-        "confidence": result.get("confidence"),
-        "rounds": result.get("rounds", []),
+        "stage": result.get("stage"),
+        "prosecutor": result.get("prosecutor"),
+        "defender": result.get("defender"),
+        "adjudicator": result.get("adjudicator"),
+        "validation_repairs": result.get("validation_repairs", []),
         "error": result.get("error"),
     }
 
@@ -528,82 +472,6 @@ def _aggregate(candidate_results: list[dict[str, Any]], expected_count: int) -> 
     if any(row.get("status") == "error" for row in candidate_results):
         return None, "OPERATIONAL_ERROR", "error"
     return None, "INCOMPLETE", "partial" if benign else "error"
-
-
-def _process_direct_source(source: dict[str, Any], engine: ABPEngine | None) -> dict[str, Any]:
-    """Run the Stage 3 protocol over a complete function without Stage 1/2 artifacts."""
-    sample_id, idx = source["sample_id"], source["idx"]
-    code = source["func"]
-    lines = code.splitlines()
-    file_name = source.get("file_name") or sample_id
-    base = {
-        "sample_id": sample_id,
-        "idx": idx,
-        "pair_id": source.get("pair_id"),
-        "ground_truth": _ground_truth(source),
-        "ground_truth_cwe": _ground_truth_cwe(source),
-        "analysis_mode": "direct_source",
-    }
-    marker_sink = {
-        "line_start": 1,
-        "line_end": max(1, len(lines)),
-        "expression": "full-function review; identify a concrete operation to audit",
-        "operation_type": "whole_function_review",
-    }
-    prompt_code = "[FULL FUNCTION SOURCE]\n" + "\n".join(
-        f"L{line}: [{file_name}:{line}] {text}"
-        for line, text in enumerate(lines, 1)
-    )
-    if engine is None:
-        return {
-            **base, "status": "error", "run_status": "error", "prediction": None,
-            "triage_status": "UNAVAILABLE", "candidate_count": 1,
-            "assessed_candidate_count": 0, "candidate_results": [],
-            "errors": ["ABP client is not configured"],
-        }
-    assessment_input = {
-        "dataset": source.get("dataset") or "direct-source",
-        "id": sample_id,
-        "input": code,
-        "prompt_code": prompt_code,
-        "model_sink": marker_sink,
-        "sink_line": None,
-        "candidate_status": "VALID",
-        "cwe_candidate": None,
-        "direct_source_mode": True,
-    }
-    result = engine.process(assessment_input)
-    prediction = result.get("prediction")
-    candidate_result = {
-        "sink_rank": 1,
-        "sink": marker_sink,
-        "analysis_scope": "full function; model selects the operation to audit",
-        "status": result.get("run_status"),
-        "prediction": prediction,
-        "triage_status": result.get("triage_status"),
-        "protocol_status": result.get("protocol_status"),
-        "round_count": result.get("round_count"),
-        "completed_rounds": result.get("completed_rounds"),
-        "vulnerable_votes": result.get("vulnerable_votes"),
-        "benign_votes": result.get("benign_votes"),
-        "confidence": result.get("confidence"),
-        "rounds": result.get("rounds", []),
-        "error": result.get("error"),
-    }
-    completed = prediction in {"VULNERABLE", "BENIGN"}
-    return {
-        **base,
-        "protocol": PROTOCOL,
-        "status": "ok" if completed else "error",
-        "run_status": result.get("run_status"),
-        "prediction": prediction,
-        "binary_prediction": prediction,
-        "triage_status": result.get("triage_status"),
-        "candidate_count": 1,
-        "assessed_candidate_count": int(completed),
-        "candidate_results": [candidate_result],
-        "errors": [result["error"]] if result.get("error") else [],
-    }
 
 
 def pair_consistency_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -653,7 +521,7 @@ def process_sample(
     source: dict[str, Any],
     stage1: dict[str, Any] | None,
     stage2: dict[str, Any] | None,
-    engine: ABPEngine | None,
+    engine: ValidationEngine | None,
 ) -> dict[str, Any]:
     sample_id, idx = source["sample_id"], source["idx"]
     base = {
@@ -663,8 +531,6 @@ def process_sample(
         "ground_truth": _ground_truth(source),
         "ground_truth_cwe": _ground_truth_cwe(source),
     }
-    if source.get("_direct_source_mode"):
-        return _process_direct_source(source, engine)
     if stage1 is None:
         return {**base, "status": "error", "run_status": "error", "prediction": None,
                 "triage_status": "UNAVAILABLE", "candidate_results": [],
@@ -733,7 +599,7 @@ def process_sample(
             if engine is None:
                 candidate_results.append({
                     "sink_rank": rank, "sink": snapshot,
-                    "status": "not_run", "error": "ABP client is not configured",
+                    "status": "not_run", "error": "LLM client is not configured",
                 })
                 continue
             candidate_results.append(assess_candidate(engine, prepared, rank, snapshot))
@@ -777,47 +643,39 @@ def build_parser():
 
     prompt_root = Path(__file__).resolve().parents[2] / "prompts"
     parser = argparse.ArgumentParser(
-        description="Run Stage 3 ABP triage over Stage 2 sink-context packets."
+        description="Run Stage 3 validation over Stage 2 sink-context packets."
     )
     parser.add_argument(
-        "--data", default="data/ground_true/sven_test.jsonl",
-        help="Source/oracle JSON or JSONL (default: data/ground_true/sven_test.jsonl)",
+        "--data", default="data/fixtures/sven_test_oracle.jsonl",
+        help="Source/oracle JSON or JSONL (default: data/fixtures/sven_test_oracle.jsonl)",
     )
     parser.add_argument("--stage1", default=None, help="Optional Stage 1 sink-localization JSONL; candidates are read from Stage 2 when omitted")
-    parser.add_argument("--stage2", default="data/sven_100pairs_stage2.jsonl", help="Stage 2 context JSONL")
-    parser.add_argument("--protocol", choices=("abp", "compact", "sven-code-only"), default="abp",
-                        help="Stage 3 protocol; compact audits Stage 2 evidence, sven-code-only analyzes reconstructed code strings")
-    parser.add_argument("--code-only-mode", choices=("two-agent", "auditor-only"), default="two-agent",
-                        help="Code-only comparison: Analyst plus Auditor, or Auditor with code only")
-    parser.add_argument("--no-few-shot", action="store_true", help="Compact: omit the three synthetic prompt examples")
-    parser.add_argument("--no-context-expansion", action="store_true", help="Compact: disable bounded local-source recovery")
-    parser.add_argument("--compact-max-lines", type=int, default=400, help="Compact: maximum source lines in initial/expanded packet")
-    parser.add_argument(
-        "--direct-source", action="store_true",
-        help="Read a JSON/JSONL dataset with input code and output ground-truth labels; bypass Stage 1/2",
-    )
+    parser.add_argument("--stage2", default="data/fixtures/stage2.jsonl", help="Stage 2 context JSONL")
     parser.add_argument(
         "--output", default=None,
         help="Output JSONL (default: outputs/runs/<timestamp>/stage3.jsonl)",
     )
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--limit", type=int, default=0, help="0 = all remaining samples")
-    parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--llm-config", default=None, help="LLM settings YAML (default: configs/llm.yaml)")
+    parser.add_argument("--model", default=None, help="Override llm.model from the config")
     parser.add_argument(
-        "--provider",
-        choices=("openrouter", "deepseek", "openai-compatible"),
-        default=None,
-        help="Model API provider (default: TRIAGE_PROVIDER or openrouter)",
-    )
-    parser.add_argument("--model", default=None, help="Override the provider's default model")
-    parser.add_argument(
-        "--prosecutor-prompt", default=str(prompt_root / "prosecutor.txt"),
+        "--prosecutor-prompt", default=None,
         help="External Prosecutor prompt file",
     )
     parser.add_argument(
-        "--defender-prompt", default=str(prompt_root / "defender.txt"),
+        "--defender-prompt", default=None,
         help="External Defender prompt file",
+    )
+    parser.add_argument(
+        "--adjudicator-prompt", default=None,
+        help="External Adjudicator prompt file",
+    )
+    parser.add_argument(
+        "--profile", choices=("faithful", "enhanced"), default="faithful",
+        help="Prompt set: faithful = prompts/faithful/ (paper description only); "
+             "enhanced = prompts/ (extra evidence contract). Per-role --*-prompt overrides it.",
     )
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate joins and report coverage without API calls")
@@ -825,87 +683,49 @@ def build_parser():
 
 
 def run(args) -> None:
-    if getattr(args, "protocol", "abp") == "sven-code-only":
-        from .code_only_runner import run as run_code_only
-        return run_code_only(args)
-    if getattr(args, "protocol", "abp") == "compact":
-        from .compact_runner import run as run_compact
-        return run_compact(args)
-    if args.start < 0 or args.limit < 0 or args.rounds < 1 or args.workers < 1:
-        raise ValueError("start/limit must be non-negative; rounds/workers must be positive")
-    provider = (
-        getattr(args, "provider", None)
-        or os.getenv("TRIAGE_PROVIDER", "openrouter")
-    ).strip().lower()
-    if provider not in {"openrouter", "deepseek", "openai-compatible"}:
-        raise ValueError(f"unsupported triage provider: {provider}")
-    model = getattr(args, "model", None)
-    if model is None:
-        if provider == "deepseek":
-            model = (
-                os.getenv("DEEPSEEK_TRIAGE_MODEL", "").strip()
-                or os.getenv("SINK_MODEL", "").strip()
-                or "deepseek-chat"
-            )
-        elif provider == "openai-compatible":
-            model = os.getenv("TRIAGE_MODEL", "qwen3-32b").strip()
-        else:
-            model = os.getenv("TRIAGE_MODEL", "qwen/qwen3-32b").strip()
-    model = model.strip()
-    if not model:
-        raise ValueError("model must be a non-empty string")
-    prompt_files = configure_prompt_templates(
-        getattr(args, "prosecutor_prompt", None),
-        getattr(args, "defender_prompt", None),
-    )
+    if args.start < 0 or args.limit < 0 or args.workers < 1:
+        raise ValueError("start/limit must be non-negative; workers must be positive")
+    llm = load_llm_config(args.llm_config, model=args.model)
+    prompt_root = Path(__file__).resolve().parents[2] / "prompts"
+    profile_dir = prompt_root / "faithful" if getattr(args, "profile", "faithful") == "faithful" else prompt_root
+    prompt_files = configure_prompt_templates(*(
+        getattr(args, f"{role}_prompt", None) or profile_dir / f"{role}.txt"
+        for role in ("prosecutor", "defender", "adjudicator")
+    ))
     prompt_digest = hashlib.sha256()
-    for role in ("prosecutor", "defender"):
+    for role in ("prosecutor", "defender", "adjudicator"):
         prompt_digest.update(role.encode("utf-8"))
         prompt_digest.update(Path(prompt_files[role]).read_bytes())
     prompt_signature = prompt_digest.hexdigest()
     run_signature = hashlib.sha256(json.dumps({
         "protocol": PROTOCOL,
         "prompt_signature": prompt_signature,
-        "provider": provider,
-        "model": model,
-        "rounds": args.rounds,
-        "direct_source_mode": args.direct_source,
+        "llm": dataclasses.asdict(llm),
     }, sort_keys=True).encode("utf-8")).hexdigest()
-    for settings in STAGE_SETTINGS.values():
-        settings["model"] = model
 
-    if args.direct_source:
-        if not args.data:
-            raise ValueError("--direct-source requires --data")
+    stage2_rows = latest_by_identity(read_jsonl(args.stage2), "Stage 2")
+    stage1_rows = (
+        latest_results(read_jsonl(args.stage1), "Stage 1", {"ok"})
+        if args.stage1
+        else {key: _stage1_from_stage2(row) for key, row in stage2_rows.items()}
+    )
+    if args.data:
         raw_source_rows = read_json_document(args.data)
-        source_rows = normalize_direct_source_rows(raw_source_rows, args.data)
-        sources = {identity(row, "direct-source dataset"): row for row in source_rows}
-        stage1_rows = {}
-        stage2_rows = {}
+        source_index = unique_index(raw_source_rows, "source/oracle dataset")
+        sources = {
+            key: source_index.get(key) or _source_from_contexts(key[0], key[1], row)
+            for key, row in stage2_rows.items()
+        }
     else:
-        stage2_rows = latest_by_identity(read_jsonl(args.stage2), "Stage 2")
-        stage1_rows = (
-            latest_results(read_jsonl(args.stage1), "Stage 1", {"ok"})
-            if args.stage1
-            else {key: _stage1_from_stage2(row) for key, row in stage2_rows.items()}
-        )
-        if args.data:
-            raw_source_rows = read_json_document(args.data)
-            source_index = unique_index(raw_source_rows, "source/oracle dataset")
-            sources = {
-                key: source_index.get(key) or _source_from_contexts(key[0], key[1], row)
-                for key, row in stage2_rows.items()
-            }
-        else:
-            sources = {
-                key: _source_from_contexts(key[0], key[1], row)
-                for key, row in stage2_rows.items()
-            }
-            for key, source in sources.items():
-                if key in stage1_rows:
-                    source["ground_truth"] = _ground_truth(stage1_rows[key])
+        sources = {
+            key: _source_from_contexts(key[0], key[1], row)
+            for key, row in stage2_rows.items()
+        }
+        for key, source in sources.items():
+            if key in stage1_rows:
+                source["ground_truth"] = _ground_truth(stage1_rows[key])
 
-        source_rows = list(sources.values())
+    source_rows = list(sources.values())
     selected_rows = source_rows[args.start:]
     if args.limit:
         selected_rows = selected_rows[:args.limit]
@@ -929,48 +749,42 @@ def run(args) -> None:
             continue
         work.append((source, stage1_rows.get(key), stage2_rows.get(key)))
 
-    if args.direct_source:
-        processable = len(work)
-    else:
-        processable = 0
-        for source, stage1, stage2 in work:
-            if stage1 is None or stage2 is None:
-                continue
-            candidates = stage1.get("sink_candidates") or []
-            by_rank = {
-                context.get("sink_rank"): context
-                for context in (stage2.get("contexts") or [])
-                if isinstance(context, dict)
-            }
-            for rank, candidate in enumerate(candidates, 1):
-                context = by_rank.get(rank)
-                if context:
-                    _, failure = prepare_candidate(source, candidate, context, rank)
-                    if failure is None:
-                        processable += 1
+    processable = 0
+    for source, stage1, stage2 in work:
+        if stage1 is None or stage2 is None:
+            continue
+        candidates = stage1.get("sink_candidates") or []
+        by_rank = {
+            context.get("sink_rank"): context
+            for context in (stage2.get("contexts") or [])
+            if isinstance(context, dict)
+        }
+        for rank, candidate in enumerate(candidates, 1):
+            context = by_rank.get(rank)
+            if context:
+                _, failure = prepare_candidate(source, candidate, context, rank)
+                if failure is None:
+                    processable += 1
 
     print(json.dumps({
-        "provider": provider,
-        "model": model,
+        "llm": dataclasses.asdict(llm),
         "protocol": PROTOCOL,
+        "profile": getattr(args, "profile", "faithful"),
         "prompt_signature": prompt_signature,
         "run_signature": run_signature,
         "prompt_files": prompt_files,
         "selected": len(selected_rows),
         "pending": len(work),
-        "analysis_mode": "direct_source" if args.direct_source else "stage2_context",
+        "analysis_mode": "stage2_context",
         "candidate_artifact_rows_available": sum(stage1 is not None for _, stage1, _ in work),
         "stage2_rows_available": sum(stage2 is not None for _, _, stage2 in work),
         "candidate_contexts_ready": processable,
         "ground_truth_available": sum(_ground_truth(row) is not None for row in selected_rows),
-        "model_input": ([
-            "full function source from input",
-            "single Prosecutor-selected operation per function",
-        ] if args.direct_source else [
+        "model_input": [
             "sink candidate snapshot copied from Stage 2",
             "Stage 2 compact_code",
             "source-backed Stage 2 call_context selected under the context budget",
-        ]),
+        ],
         "excluded_from_prompt": ["dataset label", "dataset CWE", "oracle", "patch metadata"],
         "dry_run": args.dry_run,
     }, indent=2))
@@ -983,51 +797,19 @@ def run(args) -> None:
     try:
         if processable:
             request_log = output.with_name("requests.jsonl")
-            if provider == "openrouter":
-                key = os.getenv("OPENROUTER_API_KEY", "").strip()
-                if not key:
-                    raise FatalAPIError("Set OPENROUTER_API_KEY")
-                api = OpenRouter(key, request_log)
-                api.auth_check()
-                api.preflight()
-            elif provider == "deepseek":
-                key = (
-                    os.getenv("TRIAGE_API_KEY", "").strip()
-                    or os.getenv("DEEPSEEK_API_KEY", "").strip()
-                    or os.getenv("SINK_API_KEY", "").strip()
-                )
-                if not key:
-                    raise FatalAPIError(
-                        "Set TRIAGE_API_KEY, DEEPSEEK_API_KEY, or SINK_API_KEY"
-                    )
-                base_url = (
-                    os.getenv("DEEPSEEK_BASE_URL", "").strip()
-                    or os.getenv("SINK_BASE_URL", "").strip()
-                    or "https://api.deepseek.com"
-                )
-                api = DeepSeek(key, request_log, base_url=base_url)
-            elif provider == "openai-compatible":
-                key = os.getenv("TRIAGE_API_KEY", "").strip()
-                if not key:
-                    raise FatalAPIError("Set TRIAGE_API_KEY for the OpenAI-compatible endpoint")
-                base_url = os.getenv("TRIAGE_BASE_URL", "").strip().rstrip("/")
-                if not base_url:
-                    raise FatalAPIError("Set TRIAGE_BASE_URL to the endpoint base, ending in /v1")
-                api = OpenAICompatible(key, request_log, base_url=base_url)
-            else:
-                raise ValueError(f"unsupported triage provider: {provider}")
+            api = LLMClient(llm, request_log)
+            api.auth_check()
+            api.preflight()
             append_jsonl(request_log, {
                 "event": "run_config",
-                "provider": provider,
-                "model": model,
+                "llm": dataclasses.asdict(llm),
                 "protocol": PROTOCOL,
                 "prompt_signature": prompt_signature,
                 "run_signature": run_signature,
-                "rounds": args.rounds,
                 "workers": args.workers,
                 "prompt_files": prompt_files,
             })
-            engine = ABPEngine(api, args.rounds)
+            engine = ValidationEngine(api)
         from tqdm.auto import tqdm
         results_by_key = {}
         pool = ThreadPoolExecutor(max_workers=args.workers)
@@ -1107,7 +889,24 @@ def run(args) -> None:
                 counts[category] += 1
         tp, fp, fn, tn = counts["tp"], counts["fp"], counts["fn"], counts["tn"]
         ratio = lambda numerator, denominator: numerator / denominator if denominator else None
+        valid_rows = [row for row in all_rows.values() if row.get("prediction") in {"VULNERABLE", "BENIGN"}]
+        error_causes: dict[str, int] = {}
+        for row in all_rows.values():
+            if row in valid_rows:
+                continue
+            causes = {
+                str(candidate.get("stage") or candidate.get("status") or "unknown")
+                for candidate in row.get("candidate_results") or []
+                if candidate.get("prediction") not in {"VULNERABLE", "BENIGN"}
+            } or {str(row.get("triage_status") or "unknown")}
+            for cause in causes:
+                error_causes[cause] = error_causes.get(cause, 0) + 1
         summary = {
+            "n_total": len(all_rows),
+            "n_valid": len(valid_rows),
+            "n_error": len(all_rows) - len(valid_rows),
+            "n_no_candidates": sum(row.get("run_status") == "no_candidates" for row in all_rows.values()),
+            "error_causes": error_causes,
             "samples": len(all_rows), "ground_truth_available": tp + fp + fn + tn,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn,
             "precision": ratio(tp, tp + fp), "recall": ratio(tp, tp + fn),
@@ -1122,6 +921,7 @@ def run(args) -> None:
             value = summary[name]
             print(f"{name.upper():<12} {'N/A' if value is None else f'{value:.4f}':>10}")
         print(f"{'GT samples':<12} {summary['ground_truth_available']:>10}")
+        print(f"{'Valid/Total':<12} {summary['n_valid']:>4}/{summary['n_total']:<5} errors={summary['n_error']} {error_causes or ''}")
 
         pair_metrics = pair_consistency_metrics(list(all_rows.values()))
         format_metric = lambda value: "N/A" if value is None else f"{value:.4f}"
